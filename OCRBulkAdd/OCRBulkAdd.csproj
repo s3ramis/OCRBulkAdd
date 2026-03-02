@@ -13,7 +13,7 @@
   </ItemGroup>
 
   <ItemGroup>
-  <Content Include="tessdata\*">
+  <Content Include="tessdata/*">
     <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
   </Content>

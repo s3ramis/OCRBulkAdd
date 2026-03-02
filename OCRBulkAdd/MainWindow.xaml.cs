@@ -4,11 +4,10 @@ using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Input;
-using System.Windows.Media.Imaging;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using TesseractOCR;
 using TesseractOCR.Enums;
-
 using OcrLanguage = TesseractOCR.Enums.Language;
 
 namespace OCRBulkAdd
@@ -16,8 +15,13 @@ namespace OCRBulkAdd
     public partial class MainWindow : Window
     {
         private byte[] _currentImageBytes = Array.Empty<byte>();
-
         private readonly SemaphoreSlim _ocrLock = new SemaphoreSlim(1, 1);
+
+        private const int MaxDecimalDigits = 2;
+
+        private static readonly Regex NumberTokenRegex = new Regex(
+            @"(?:(?:[+\-]|−|–|—)[ \t\u00A0\u202F]*)?(?:(?:\d{1,3}(?:[., \t\u00A0\u202F]\d{3})+|\d+)(?:[.,]\d+)?|[.,]\d+)",
+            RegexOptions.Compiled);
 
         private static readonly HashSet<string> ImageExtensions =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -47,6 +51,9 @@ namespace OCRBulkAdd
             return Path.Combine(baseDir, "tessdata");
         }
 
+        // --------------------
+        // Clipboard paste (Ctrl+V / Strg+V)
+        // --------------------
         private async void Window_PreviewKeyDown(object sender, KeyEventArgs e)
         {
             if (e.Key != Key.V) return;
@@ -73,7 +80,6 @@ namespace OCRBulkAdd
                         var bmp = Clipboard.GetImage();
                         if (bmp != null)
                         {
-                            bmp = PrepareForOcr(bmp);
                             bytes = BitmapSourceToPngBytes(bmp);
                             return true;
                         }
@@ -105,7 +111,6 @@ namespace OCRBulkAdd
                         return false;
 
                     string? file = files.Cast<string>().FirstOrDefault(IsLikelyImageFile);
-
                     if (string.IsNullOrWhiteSpace(file) || !File.Exists(file))
                         return false;
 
@@ -121,6 +126,9 @@ namespace OCRBulkAdd
             return false;
         }
 
+        // --------------------
+        // Drag & drop
+        // --------------------
         private void Window_DragOver(object sender, DragEventArgs e)
         {
             e.Effects = HasImageData(e.Data) ? DragDropEffects.Copy : DragDropEffects.None;
@@ -191,23 +199,24 @@ namespace OCRBulkAdd
 
         private void SetImageBytes(byte[] bytes)
         {
-            if (bytes.Length == 0)
-                return;
+            if (bytes.Length == 0) return;
 
             try
             {
                 BitmapImage preview = BytesToBitmapImage(bytes);
                 PreviewImage.Source = preview;
 
-                _currentImageBytes = BitmapSourceToPngBytes(preview);
+                var prepared = PrepareForOcr(preview);
+                _currentImageBytes = BitmapSourceToPngBytes(prepared);
             }
             catch
             {
                 PreviewImage.Source = null;
-                _currentImageBytes = bytes; // fallback
+                _currentImageBytes = bytes;
             }
 
-            OcrTextBox.Clear();
+            OcrPreviewTextBox.Clear();
+            NumbersTextBox.Clear();
             StatusText.Text = "image loaded.";
             SumResultText.Text = "sum: -";
             UpdateHintVisibility();
@@ -225,8 +234,9 @@ namespace OCRBulkAdd
 
         private void Sum_Click(object sender, RoutedEventArgs e)
         {
-            var (sum, count) = SumNumbersFromText(OcrTextBox.Text);
-            SumResultText.Text = $"sum: {sum.ToString("N", CultureInfo.CurrentCulture)}    (numbers found: {count})";
+            var (sum, count) = SumNumbersFromText(NumbersTextBox.Text);
+
+            SumResultText.Text = $"sum: {sum.ToString("0.00", CultureInfo.CurrentCulture)} (numbers found: {count})";
         }
 
         private async Task RunOcrAsync()
@@ -249,7 +259,6 @@ namespace OCRBulkAdd
                         throw new DirectoryNotFoundException("missing tessdata folder: " + TessdataPath);
 
                     var languages = new List<OcrLanguage>();
-
                     string eng = Path.Combine(TessdataPath, "eng.traineddata");
                     string deu = Path.Combine(TessdataPath, "deu.traineddata");
 
@@ -263,14 +272,12 @@ namespace OCRBulkAdd
                     {
                         ["load_system_dawg"] = 0,
                         ["load_freq_dawg"] = 0,
-                        ["user_defined_dpi"] = 30
+                        ["user_defined_dpi"] = 300
                     };
 
                     using (var engine = new Engine(TessdataPath, languages, EngineMode.LstmOnly, initialValues: initialValues))
                     {
                         engine.DefaultPageSegMode = PageSegMode.SparseText;
-                        //engine.SetVariable("tessedit_write_images", true);
-                        // engine.SetVariable("tessedit_char_whitelist", "0123456789.,-");
 
                         using (var img = TesseractOCR.Pix.Image.LoadFromMemory(bytes))
                         using (var page = engine.Process(img, PageSegMode.SparseText))
@@ -280,7 +287,13 @@ namespace OCRBulkAdd
                     }
                 });
 
-                OcrTextBox.Text = text.Trim();
+                var previewText = text;
+
+                OcrPreviewTextBox.Text = previewText;
+
+
+                NumbersTextBox.Text = ExtractNormalizedNumbersText(previewText);
+
                 StatusText.Text = "OCR done.";
             }
             catch (Exception ex)
@@ -293,74 +306,116 @@ namespace OCRBulkAdd
             }
         }
 
+        private static string ExtractNormalizedNumbersText(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return string.Empty;
+
+            var numbers = new List<string>();
+
+            foreach (Match m in NumberTokenRegex.Matches(text))
+            {
+                if (TryParseByLastSeparatorRule(m.Value, out var value))
+                {
+                    numbers.Add(value.ToString("0.00", CultureInfo.InvariantCulture));
+                }
+            }
+
+            return string.Join(Environment.NewLine, numbers);
+        }
+
         private static (decimal Sum, int Count) SumNumbersFromText(string text)
         {
             if (string.IsNullOrWhiteSpace(text))
                 return (0m, 0);
 
-            var matches = Regex.Matches(
-                text,
-                @"(?:[+-][ \u00A0\u202F]*)?(?:\d{1,3}(?:[., \u00A0\u202F]\d{3})+|\d+)(?:[.,]\d+)?");
-
             decimal sum = 0m;
             int count = 0;
 
-            var cultures = new[]
+            foreach (Match m in NumberTokenRegex.Matches(text))
             {
-                CultureInfo.GetCultureInfo("de-DE"),
-                CultureInfo.GetCultureInfo("en-US"),
-                CultureInfo.InvariantCulture
-            };
-
-            foreach (Match m in matches)
-            {
-                string token = m.Value.Trim();
-
-                token = token.Replace(" ", "")
-                            .Replace("\u00A0", "")   // NBSP
-                            .Replace("\u202F", "");  // narrow NBSP
-
-                foreach (var culture in cultures)
+                if (TryParseByLastSeparatorRule(m.Value, out var value))
                 {
-                    if (decimal.TryParse(token,
-                        NumberStyles.Number | NumberStyles.AllowLeadingSign,
-                        culture,
-                        out decimal value))
-                    {
-                        sum += value;
-                        count++;
-                        break;
-                    }
+                    sum += value;
+                    count++;
                 }
             }
 
             return (sum, count);
         }
 
-        private static byte[] BitmapSourceToPngBytes(BitmapSource source)
+        private static bool TryParseByLastSeparatorRule(string raw, out decimal value)
         {
-            var encoder = new PngBitmapEncoder();
-            encoder.Frames.Add(BitmapFrame.Create(source));
+            value = 0m;
+            if (string.IsNullOrWhiteSpace(raw))
+                return false;
 
-            using (var ms = new MemoryStream())
-            {
-                encoder.Save(ms);
-                return ms.ToArray();
-            }
-        }
+            // normalize minusses
+            string s = raw.Trim()
+                .Replace('−', '-')
+                .Replace('–', '-')
+                .Replace('—', '-')
+                .Replace('‐', '-');
 
-        private static BitmapImage BytesToBitmapImage(byte[] bytes)
-        {
-            using (var ms = new MemoryStream(bytes))
+            // retarded accounting number format for negative numbers
+            bool negParen = s.StartsWith("(") && s.EndsWith(")");
+            if (negParen)
+                s = s.Substring(1, s.Length - 2);
+
+            // remove spaces
+            s = s.Replace(" ", "")
+                 .Replace("\t", "")
+                 .Replace("\u00A0", "")
+                 .Replace("\u202F", "");
+
+            // retarded accounting number format for negative numbers part 2
+            bool negative = negParen;
+            if (s.StartsWith("+"))
+                s = s.Substring(1);
+            else if (s.StartsWith("-"))
             {
-                var bmp = new BitmapImage();
-                bmp.BeginInit();
-                bmp.CacheOption = BitmapCacheOption.OnLoad;
-                bmp.StreamSource = ms;
-                bmp.EndInit();
-                bmp.Freeze();
-                return bmp;
+                negative = true;
+                s = s.Substring(1);
             }
+
+            // find last decimal seperator
+            int lastDot = s.LastIndexOf('.');
+            int lastComma = s.LastIndexOf(',');
+            int lastSepIndex = Math.Max(lastDot, lastComma);
+
+            int digitsAfterSep = 0;
+            if (lastSepIndex >= 0)
+                digitsAfterSep = s.Length - lastSepIndex - 1;
+
+            // remove non-digits
+            string digitsOnly = new string(s.Where(char.IsDigit).ToArray());
+            if (digitsOnly.Length == 0)
+                return false;
+
+            // re-insert decimal seperator to assemble a plausible number
+            string normalized;
+
+            if (lastSepIndex >= 0 && digitsAfterSep > 0 && digitsAfterSep <= MaxDecimalDigits)
+            {
+                // padding with a leading 0 if necessary
+                if (digitsOnly.Length <= digitsAfterSep)
+                    digitsOnly = digitsOnly.PadLeft(digitsAfterSep + 1, '0');
+
+                normalized = digitsOnly.Insert(digitsOnly.Length - digitsAfterSep, ".");
+            }
+            else
+            {
+                normalized = digitsOnly;
+            }
+
+            if (!decimal.TryParse(normalized,
+                    NumberStyles.AllowDecimalPoint,
+                    CultureInfo.InvariantCulture,
+                    out var parsed))
+                return false;
+                
+            value = negative ? -parsed : parsed;
+            return true;
         }
 
         private static BitmapSource PrepareForOcr(BitmapSource src)
@@ -390,6 +445,32 @@ namespace OCRBulkAdd
             rtb.Render(dv);
             rtb.Freeze();
             return rtb;
+        }
+
+        private static byte[] BitmapSourceToPngBytes(BitmapSource source)
+        {
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(source));
+
+            using (var ms = new MemoryStream())
+            {
+                encoder.Save(ms);
+                return ms.ToArray();
+            }
+        }
+
+        private static BitmapImage BytesToBitmapImage(byte[] bytes)
+        {
+            using (var ms = new MemoryStream(bytes))
+            {
+                var bmp = new BitmapImage();
+                bmp.BeginInit();
+                bmp.CacheOption = BitmapCacheOption.OnLoad;
+                bmp.StreamSource = ms;
+                bmp.EndInit();
+                bmp.Freeze();
+                return bmp;
+            }
         }
     }
 }
