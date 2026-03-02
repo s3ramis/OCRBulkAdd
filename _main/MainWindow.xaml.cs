@@ -18,6 +18,8 @@ namespace OCRBulkAdd
         private byte[] _currentImageBytes = Array.Empty<byte>();
 
         private readonly SemaphoreSlim _ocrLock = new SemaphoreSlim(1, 1);
+        private const int MaxDecimalDigits = 2; 
+        private static readonly Regex NumberTokenRegex = new Regex(@"(?:(?:[+\-]|−|–|—)[ \t\u00A0\u202F]*)?(?:(?:\d{1,3}(?:[., \t\u00A0\u202F]\d{3})+|\d+)(?:[.,]\d+)?|[.,]\d+)", RegexOptions.Compiled);
 
         private static readonly HashSet<string> ImageExtensions =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -298,39 +300,15 @@ namespace OCRBulkAdd
             if (string.IsNullOrWhiteSpace(text))
                 return (0m, 0);
 
-            var matches = Regex.Matches(
-                text,
-                @"(?:[+-][ \u00A0\u202F]*)?(?:\d{1,3}(?:[., \u00A0\u202F]\d{3})+|\d+)(?:[.,]\d+)?");
-
             decimal sum = 0m;
             int count = 0;
 
-            var cultures = new[]
+            foreach (Match m in NumberTokenRegex.Matches(text))
             {
-                CultureInfo.GetCultureInfo("de-DE"),
-                CultureInfo.GetCultureInfo("en-US"),
-                CultureInfo.InvariantCulture
-            };
-
-            foreach (Match m in matches)
-            {
-                string token = m.Value.Trim();
-
-                token = token.Replace(" ", "")
-                            .Replace("\u00A0", "")   // NBSP
-                            .Replace("\u202F", "");  // narrow NBSP
-
-                foreach (var culture in cultures)
+                if (TryParseByLastSeparatorRule(m.Value, out var value))
                 {
-                    if (decimal.TryParse(token,
-                        NumberStyles.Number | NumberStyles.AllowLeadingSign,
-                        culture,
-                        out decimal value))
-                    {
-                        sum += value;
-                        count++;
-                        break;
-                    }
+                    sum += value;
+                    count++;
                 }
             }
 
@@ -404,6 +382,80 @@ namespace OCRBulkAdd
                         .Where(l => !string.IsNullOrWhiteSpace(l));
 
             return string.Join(Environment.NewLine, lines).Trim();
+        }
+
+        private static bool TryParseByLastSeparatorRule(string raw, out decimal value)
+        {
+            value = 0m;
+            if (string.IsNullOrWhiteSpace(raw))
+                return false;
+
+            // normalize minusses
+            string s = raw.Trim()
+                .Replace('−', '-') // U+2212
+                .Replace('–', '-') // U+2013
+                .Replace('—', '-') // U+2014
+                .Replace('‐', '-'); // U+2010
+
+            // retarded accounting number format for negative numbers
+            bool negParen = s.StartsWith("(") && s.EndsWith(")");
+            if (negParen)
+                s = s.Substring(1, s.Length - 2);
+
+            // remove spaces
+            s = s.Replace(" ", "")
+                .Replace("\t", "")
+                .Replace("\u00A0", "")  // NBSP
+                .Replace("\u202F", ""); // narrow NBSP
+
+            // retarded accounting number format for negative numbers part 2
+            bool negative = negParen;
+            if (s.StartsWith("+"))
+                s = s.Substring(1);
+            else if (s.StartsWith("-"))
+            {
+                negative = true;
+                s = s.Substring(1);
+            }
+
+            // find last decimal seperator
+            int lastDot = s.LastIndexOf('.');
+            int lastComma = s.LastIndexOf(',');
+            int lastSepIndex = Math.Max(lastDot, lastComma);
+
+            int digitsAfterSep = 0;
+            if (lastSepIndex >= 0)
+                digitsAfterSep = s.Length - lastSepIndex - 1;
+
+            // remove non-digits
+            string digitsOnly = new string(s.Where(char.IsDigit).ToArray());
+            if (digitsOnly.Length == 0)
+                return false;
+
+            // re-insert decimal seperator to create plausible numbers eg ,50 -> 0.50
+            string normalized;
+
+            if (lastSepIndex >= 0 && digitsAfterSep > 0 && digitsAfterSep <= MaxDecimalDigits)
+            {
+                if (digitsOnly.Length <= digitsAfterSep)
+                    digitsOnly = digitsOnly.PadLeft(digitsAfterSep + 1, '0');
+
+                normalized = digitsOnly.Insert(digitsOnly.Length - digitsAfterSep, ".");
+            }
+            else
+            {
+                normalized = digitsOnly;
+            }
+
+            if (!decimal.TryParse(
+                    normalized,
+                    NumberStyles.AllowDecimalPoint,
+                    CultureInfo.InvariantCulture,
+                    out var parsed))
+                return false;
+
+            value = negative ? -parsed : parsed;
+            return true;
         }
     }
 }
