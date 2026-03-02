@@ -2,7 +2,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.5.2.0
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OCRBulkAdd", "OCRBulkAdd.csproj", "{FF93B074-1E7F-A397-D3AC-C88487BE7309}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OCRBulkAdd", "OCRBulkAdd/OCRBulkAdd.csproj", "{FF93B074-1E7F-A397-D3AC-C88487BE7309}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
