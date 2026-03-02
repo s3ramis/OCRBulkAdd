@@ -9,14 +9,14 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="TesseractOCR" Version="5.5.1" />
-  </ItemGroup>
-
-  <ItemGroup>
   <Content Include="tessdata\*">
     <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
   </Content>
 </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="TesseractOCR" Version="5.5.1" />
+  </ItemGroup>
 
 </Project>

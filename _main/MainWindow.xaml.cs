@@ -1,11 +1,11 @@
 ﻿using System.Globalization;
-using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
+using System.IO;
 using System.Windows;
-using System.Windows.Input;
-using System.Windows.Media.Imaging;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Input;
 using TesseractOCR;
 using TesseractOCR.Enums;
 
@@ -280,7 +280,7 @@ namespace OCRBulkAdd
                     }
                 });
 
-                OcrTextBox.Text = text.Trim();
+                OcrTextBox.Text = NormalizeOcrText(text);
                 StatusText.Text = "OCR done.";
             }
             catch (Exception ex)
@@ -390,6 +390,20 @@ namespace OCRBulkAdd
             rtb.Render(dv);
             rtb.Freeze();
             return rtb;
+        }
+
+        private static string NormalizeOcrText(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s))
+                return string.Empty;
+
+            s = s.Replace("\r\n", "\n").Replace('\r', '\n');
+
+            var lines = s.Split('\n')
+                        .Select(l => l.Trim())
+                        .Where(l => !string.IsNullOrWhiteSpace(l));
+
+            return string.Join(Environment.NewLine, lines).Trim();
         }
     }
 }
