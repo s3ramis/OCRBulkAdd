@@ -18,34 +18,46 @@ namespace OCRBulkAdd.Processing
         ///  5) binarization (black/white)
         ///  6) add border
         /// </summary>
-        public static BitmapSource PrepareForOcr(
-            BitmapSource src,
-            double scale = 2.0,
-            int borderPx = 12,
-            double lowCutPercent = 0.01,
-            double highCutPercent = 0.99)
+        public static BitmapSource PrepareForOcr(BitmapSource src, PreprocessingSettings settings)
         {
             if (src == null) throw new ArgumentNullException(nameof(src));
+            if (settings == null) throw new ArgumentNullException(nameof(settings));
 
-            // 1) If PNGs have alpha, composite them on white so antialiased edges stay light.
+            // If disabled, return as-is (no transformation).
+            if (!settings.Enabled)
+                return src;
+
+            // 1) Composite transparency on white so antialiased edges don't become gray/dark.
             BitmapSource opaque = CompositeOnWhite(src);
 
-            // 2) Upscale to improve recognition of punctuation.
-            var scaled = new TransformedBitmap(opaque, new ScaleTransform(scale, scale));
-            scaled.Freeze();
+            // 2) Upscale: small punctuation (minus/comma) gets more pixels -> higher hit-rate.
+            BitmapSource scaled = opaque;
+            if (Math.Abs(settings.Scale - 1.0) > 0.0001)
+            {
+                var t = new TransformedBitmap(opaque, new ScaleTransform(settings.Scale, settings.Scale));
+                t.Freeze();
+                scaled = t;
+            }
 
-            // 3) Grayscale (8-bit).
+            // 3) Convert to Gray8 (needed for histogram + Otsu).
             var gray = new FormatConvertedBitmap(scaled, PixelFormats.Gray8, null, 0);
             gray.Freeze();
 
-            // 4) "Levels": stretch the histogram to boost contrast and brighten near-white backgrounds.
-            var contrasted = AutoContrastGray8(gray, lowCutPercent, highCutPercent);
+            BitmapSource working = gray;
 
-            // 5) Convert to pure black/white.
-            var binary = BinarizeOtsuGray8(contrasted);
+            // 4) Auto-contrast: stretches histogram, often turning "off-white" background into white.
+            if (settings.EnableAutoContrast)
+                working = AutoContrastGray8(working, settings.LowCutPercent, settings.HighCutPercent);
 
-            // 6) Border for better segmentation.
-            return AddBorderGray8(binary, borderPx);
+            // 5) Binarize: converts to pure black/white; helps when background is uneven.
+            if (settings.EnableBinarization)
+                working = BinarizeOtsuGray8(working, autoInvert: settings.AutoInvert);
+
+            // 6) Add a clean white border: helps layout analysis and avoids cropping at edges.
+            if (settings.BorderPx > 0)
+                working = AddBorderGray8(working, settings.BorderPx);
+
+            return working;
         }
 
         private static BitmapSource CompositeOnWhite(BitmapSource src)
@@ -151,7 +163,7 @@ namespace OCRBulkAdd.Processing
             return bmp;
         }
 
-        private static BitmapSource BinarizeOtsuGray8(BitmapSource gray)
+        private static BitmapSource BinarizeOtsuGray8(BitmapSource gray, bool autoInvert)
         {
             if (gray.Format != PixelFormats.Gray8)
             {
@@ -214,7 +226,7 @@ namespace OCRBulkAdd.Processing
             }
 
             // If background is mostly black, invert to "black text on white"
-            if (black > white)
+            if (autoInvert && black > white)
             {
                 for (int i = 0; i < bin.Length; i++)
                     bin[i] = (byte)(255 - bin[i]);

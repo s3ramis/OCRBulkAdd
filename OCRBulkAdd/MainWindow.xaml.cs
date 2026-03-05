@@ -3,8 +3,8 @@ using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
-using System.Windows.Media.Imaging;
 using OCRBulkAdd.Processing;
 using OCRBulkAdd.Services;
 using OCRBulkAdd.Utils;
@@ -13,25 +13,22 @@ namespace OCRBulkAdd
 {
     public partial class MainWindow : Window
     {
-        // preprocessed image as bytes to be sent to tesseract
-        private byte[] _currentImageBytes = Array.Empty<byte>();
+        // bind target for the Expander
+        public PreprocessingSettings Preprocess { get; } = new PreprocessingSettings();
 
-        // prevent ocr spazzing out for fast concurrent image inputs
+        private byte[] _originalImageBytes = Array.Empty<byte>();
+        private byte[] _currentOcrImageBytes = Array.Empty<byte>();
+
         private readonly SemaphoreSlim _ocrLock = new SemaphoreSlim(1, 1);
-
-        private readonly OcrService _ocrService = new OcrService
-        {
-            // output preprocessed image for debugging
-            WriteDebugImages = false
-        };
+        private readonly OcrService _ocrService = new OcrService();
 
         public MainWindow()
         {
             InitializeComponent();
+            DataContext = this; // needed so Expander can bind to {Binding Preprocess}
             UpdateHintVisibility();
         }
 
-        // input handling
         private async void Window_PreviewKeyDown(object sender, KeyEventArgs e)
         {
             if (e.Key != Key.V) return;
@@ -60,46 +57,34 @@ namespace OCRBulkAdd
             }
         }
 
-        private async void RunOcr_Click(object sender, RoutedEventArgs e)
-        {
-            await RunOcrAsync();
-        }
-
-        private void Sum_Click(object sender, RoutedEventArgs e)
-        {
-            // add numbers extracted from ocr'ed text
-            var (sum, count) = NumberExtractor.SumFromText(NumbersTextBox.Text);
-
-            SumResultText.Text = $"sum: {sum.ToString("0.00", CultureInfo.InvariantCulture)} (numbers found: {count})";
-        }
-
-        // --- INTERNALS ---
         private void SetImage(byte[] bytes)
         {
             if (bytes == null || bytes.Length == 0) return;
 
-            try
-            {
-                BitmapImage preview = ImageHelper.BytesToBitmapImage(bytes);
-                PreviewImage.Source = preview;
+            _originalImageBytes = bytes;
 
-                var prepared = ImagePreprocessor.PrepareForOcr(preview);
+            var preview = ImageHelper.BytesToBitmapImage(bytes);
+            PreviewImage.Source = preview;
 
-                _currentImageBytes = ImageHelper.BitmapSourceToPngBytes(prepared);
-            }
-            catch
-            {
-                // still try to ocr even if preprocessing fails
-                PreviewImage.Source = null;
-                _currentImageBytes = bytes;
-            }
+            RebuildOcrBytesFromSettings();
 
             OcrPreviewTextBox.Clear();
             NumbersTextBox.Clear();
+            SumResultBox.Clear();
+            SumMetaText.Text = "";
 
             StatusText.Text = "image loaded.";
-            SumResultText.Text = "sum: -";
             UpdateHintVisibility();
+        }
+
+        private void RebuildOcrBytesFromSettings()
+        {
+            if (_originalImageBytes.Length == 0) return;
+
+            // Always rebuild from original bytes (avoid re-processing already processed image)
+            var src = ImageHelper.BytesToBitmapImage(_originalImageBytes);
+            var prepared = ImagePreprocessor.PrepareForOcr(src, Preprocess);
+            _currentOcrImageBytes = ImageHelper.BitmapSourceToPngBytes(prepared);
         }
 
         private void UpdateHintVisibility()
@@ -107,9 +92,31 @@ namespace OCRBulkAdd
             DropHint.Visibility = PreviewImage.Source == null ? Visibility.Visible : Visibility.Collapsed;
         }
 
+        private async void RunOcr_Click(object sender, RoutedEventArgs e)
+        {
+            await RunOcrAsync();
+        }
+
+        private async void ApplyPreprocessAndOcr_Click(object sender, RoutedEventArgs e)
+        {
+            await RunOcrAsync();
+        }
+
+        private void PreprocessPreset_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            // We map by SelectedIndex to keep it simple.
+            switch (PreprocessPresetCombo.SelectedIndex)
+            {
+                case 0: Preprocess.ApplyPreset(PreprocessingPreset.Default); break;
+                case 1: Preprocess.ApplyPreset(PreprocessingPreset.Aggressive); break;
+                case 2: Preprocess.ApplyPreset(PreprocessingPreset.NoBinarization); break;
+                case 3: Preprocess.ApplyPreset(PreprocessingPreset.Disabled); break;
+            }
+        }
+
         private async Task RunOcrAsync()
         {
-            if (_currentImageBytes.Length == 0)
+            if (_originalImageBytes.Length == 0)
             {
                 StatusText.Text = "no image yet (paste or drop one).";
                 return;
@@ -120,9 +127,11 @@ namespace OCRBulkAdd
             {
                 StatusText.Text = "running OCR...";
 
-                string raw = await _ocrService.RecognizeAsync(_currentImageBytes);
+                // apply current UI settings every time before OCR
+                RebuildOcrBytesFromSettings();
 
-                // preview of ocr'ed text
+                string raw = await _ocrService.RecognizeAsync(_currentOcrImageBytes);
+
                 string previewText = OcrTextNormalizer.Normalize(raw);
                 OcrPreviewTextBox.Text = previewText;
 
@@ -137,6 +146,30 @@ namespace OCRBulkAdd
             finally
             {
                 _ocrLock.Release();
+            }
+        }
+
+        private void Sum_Click(object sender, RoutedEventArgs e)
+        {
+            var (sum, count) = NumberExtractor.SumFromText(NumbersTextBox.Text);
+
+            // international output
+            SumResultBox.Text = sum.ToString("0.00", CultureInfo.InvariantCulture);
+            SumMetaText.Text = $"numbers found: {count}";
+        }
+
+        private void CopySum_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(SumResultBox.Text))
+                    Clipboard.SetText(SumResultBox.Text);
+
+                StatusText.Text = "sum copied to clipboard.";
+            }
+            catch (Exception ex)
+            {
+                StatusText.Text = "copy failed: " + ex.Message;
             }
         }
     }

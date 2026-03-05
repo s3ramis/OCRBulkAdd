@@ -1,7 +1,8 @@
 ﻿<Window x:Class="OCRBulkAdd.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="OCR Bulk Add" Height="600" Width="950"
+        Title="OCR Bulk Add"
+        Height="650" Width="980"
         AllowDrop="True"
         PreviewKeyDown="Window_PreviewKeyDown"
         DragOver="Window_DragOver"
@@ -15,8 +16,8 @@
         </Grid.RowDefinitions>
 
         <StackPanel Orientation="Horizontal" Grid.Row="0" Margin="0,0,0,10" VerticalAlignment="Center">
-            <Button Content="run OCR" Padding="12,6" Margin="0,0,10,0" Click="RunOcr_Click"/>
-            <Button Content="add numbers" Padding="12,6" Click="Sum_Click"/>
+            <Button Content="Run OCR" Padding="12,6" Margin="0,0,10,0" Click="RunOcr_Click"/>
+            <Button Content="Add numbers" Padding="12,6" Click="Sum_Click"/>
             <TextBlock x:Name="StatusText" Margin="12,0,0,0" VerticalAlignment="Center"/>
         </StackPanel>
 
@@ -30,7 +31,7 @@
                 <Grid>
                     <Image x:Name="PreviewImage" Stretch="Uniform"/>
                     <TextBlock x:Name="DropHint"
-                               Text="paste image from clipboard (strg+v) or drag and drop file"
+                               Text="paste image (Ctrl+V) or drag &amp; drop file"
                                Foreground="Gray"
                                TextAlignment="Center"
                                VerticalAlignment="Center"
@@ -42,15 +43,94 @@
             <Grid Grid.Column="1">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="140"/> 
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="120"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
 
-                <TextBlock Grid.Row="0" Text="OCR preview (read-only):" Margin="0,0,0,4"/>
+                <Expander Grid.Row="0"
+                          Header="Preprocessing"
+                          IsExpanded="False"
+                          Margin="0,0,0,10"
+                          DataContext="{Binding Preprocess}">
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <TextBlock Text="Preset:" Width="70" VerticalAlignment="Center"/>
+                            <ComboBox x:Name="PreprocessPresetCombo"
+                                      Width="240"
+                                      SelectionChanged="PreprocessPreset_SelectionChanged">
+                                <ComboBoxItem Content="Default" IsSelected="True"/>
+                                <ComboBoxItem Content="Aggressive (more contrast)"/>
+                                <ComboBoxItem Content="No binarization"/>
+                                <ComboBoxItem Content="Disabled"/>
+                            </ComboBox>
+                            <Button Content="Apply + OCR"
+                                    Margin="10,0,0,0"
+                                    Padding="10,4"
+                                    Click="ApplyPreprocessAndOcr_Click"/>
+                        </StackPanel>
 
+                        <WrapPanel Margin="0,0,0,8">
+                            <CheckBox Content="Enable" IsChecked="{Binding Enabled}" Margin="0,0,14,0"/>
+                            <CheckBox Content="Auto contrast" IsChecked="{Binding EnableAutoContrast}" Margin="0,0,14,0"/>
+                            <CheckBox Content="Binarize (Otsu)" IsChecked="{Binding EnableBinarization}" Margin="0,0,14,0"/>
+                            <CheckBox Content="Auto invert" IsChecked="{Binding AutoInvert}"/>
+                        </WrapPanel>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Scale:" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                            <Slider Grid.Row="0" Grid.Column="1"
+                                    Minimum="1" Maximum="4" SmallChange="0.1" LargeChange="0.5"
+                                    Value="{Binding Scale, Mode=TwoWay}"
+                                    IsSnapToTickEnabled="False"/>
+                            <TextBlock Grid.Row="0" Grid.Column="2"
+                                       Text="{Binding Scale, StringFormat={}{0:0.0}x}"
+                                       Margin="8,0,0,0" VerticalAlignment="Center"/>
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Border:" Margin="0,6,8,0" VerticalAlignment="Center"/>
+                            <Slider Grid.Row="1" Grid.Column="1" Margin="0,6,0,0"
+                                    Minimum="0" Maximum="40" TickFrequency="1"
+                                    IsSnapToTickEnabled="True"
+                                    Value="{Binding BorderPx, Mode=TwoWay}"/>
+                            <TextBlock Grid.Row="1" Grid.Column="2"
+                                       Text="{Binding BorderPx, StringFormat={}{0}px}"
+                                       Margin="8,6,0,0" VerticalAlignment="Center"/>
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Low cut:" Margin="0,6,8,0" VerticalAlignment="Center"/>
+                            <Slider Grid.Row="2" Grid.Column="1" Margin="0,6,0,0"
+                                    Minimum="0" Maximum="0.05" SmallChange="0.005" LargeChange="0.01"
+                                    Value="{Binding LowCutPercent, Mode=TwoWay}"/>
+                            <TextBlock Grid.Row="2" Grid.Column="2"
+                                       Text="{Binding LowCutPercent, StringFormat={}{0:P0}}"
+                                       Margin="8,6,0,0" VerticalAlignment="Center"/>
+
+                            <TextBlock Grid.Row="3" Grid.Column="0" Text="High cut:" Margin="0,6,8,0" VerticalAlignment="Center"/>
+                            <Slider Grid.Row="3" Grid.Column="1" Margin="0,6,0,0"
+                                    Minimum="0.95" Maximum="1.0" SmallChange="0.005" LargeChange="0.01"
+                                    Value="{Binding HighCutPercent, Mode=TwoWay}"/>
+                            <TextBlock Grid.Row="3" Grid.Column="2"
+                                       Text="{Binding HighCutPercent, StringFormat={}{0:P0}}"
+                                       Margin="8,6,0,0" VerticalAlignment="Center"/>
+                        </Grid>
+                    </StackPanel>
+                </Expander>
+
+                <TextBlock Grid.Row="1" Text="OCR preview (read-only):" Margin="0,0,0,4"/>
                 <TextBox x:Name="OcrPreviewTextBox"
-                         Grid.Row="1"
+                         Grid.Row="2"
                          IsReadOnly="True"
                          TextWrapping="Wrap"
                          VerticalScrollBarVisibility="Auto"
@@ -58,10 +138,9 @@
                          FontFamily="Consolas"
                          FontSize="12"/>
 
-                <TextBlock Grid.Row="2" Text="numbers used for sum (editable):" Margin="0,10,0,4"/>
-
+                <TextBlock Grid.Row="3" Text="numbers used for sum (editable):" Margin="0,10,0,4"/>
                 <TextBox x:Name="NumbersTextBox"
-                         Grid.Row="3"
+                         Grid.Row="4"
                          AcceptsReturn="True"
                          TextWrapping="Wrap"
                          VerticalScrollBarVisibility="Auto"
@@ -72,7 +151,35 @@
         </Grid>
 
         <Border Grid.Row="2" BorderBrush="Gray" BorderThickness="1" CornerRadius="4" Padding="8" Margin="0,10,0,0">
-            <TextBlock x:Name="SumResultText" Text="Sum: -" FontWeight="SemiBold"/>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="220"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <TextBlock Text="Sum:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+
+                <TextBox x:Name="SumResultBox"
+                         Grid.Column="1"
+                         IsReadOnly="True"
+                         VerticalContentAlignment="Center"
+                         Padding="6,2"
+                         FontWeight="SemiBold"/>
+
+                <Button Grid.Column="2"
+                        Content="Copy"
+                        Margin="8,0,0,0"
+                        Padding="10,4"
+                        Click="CopySum_Click"/>
+
+                <TextBlock x:Name="SumMetaText"
+                           Grid.Column="3"
+                           Margin="10,0,0,0"
+                           VerticalAlignment="Center"
+                           Foreground="Gray"/>
+            </Grid>
         </Border>
     </Grid>
 </Window>
