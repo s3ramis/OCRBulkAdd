@@ -1,7 +1,5 @@
-﻿using System;
+﻿using System.ComponentModel;
 using System.Globalization;
-using System.Threading;
-using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -13,7 +11,6 @@ namespace OCRBulkAdd
 {
     public partial class MainWindow : Window
     {
-        // bind target for the Expander
         public PreprocessingSettings Preprocess { get; } = new PreprocessingSettings();
 
         private byte[] _originalImageBytes = Array.Empty<byte>();
@@ -25,7 +22,12 @@ namespace OCRBulkAdd
         public MainWindow()
         {
             InitializeComponent();
-            DataContext = this; // needed so Expander can bind to {Binding Preprocess}
+            DataContext = this;
+
+            SettingsStore.TryLoadInto(Preprocess);
+
+            Closing += MainWindow_Closing;
+
             UpdateHintVisibility();
         }
 
@@ -81,7 +83,7 @@ namespace OCRBulkAdd
         {
             if (_originalImageBytes.Length == 0) return;
 
-            // Always rebuild from original bytes (avoid re-processing already processed image)
+            // always start preprocessing from original image
             var src = ImageHelper.BytesToBitmapImage(_originalImageBytes);
             var prepared = ImagePreprocessor.PrepareForOcr(src, Preprocess);
             _currentOcrImageBytes = ImageHelper.BitmapSourceToPngBytes(prepared);
@@ -104,7 +106,6 @@ namespace OCRBulkAdd
 
         private void PreprocessPreset_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            // We map by SelectedIndex to keep it simple.
             switch (PreprocessPresetCombo.SelectedIndex)
             {
                 case 0: Preprocess.ApplyPreset(PreprocessingPreset.Default); break;
@@ -127,7 +128,7 @@ namespace OCRBulkAdd
             {
                 StatusText.Text = "running OCR...";
 
-                // apply current UI settings every time before OCR
+                // apply ocr settings from ui before ocr process starts
                 RebuildOcrBytesFromSettings();
 
                 string raw = await _ocrService.RecognizeAsync(_currentOcrImageBytes);
@@ -153,7 +154,6 @@ namespace OCRBulkAdd
         {
             var (sum, count) = NumberExtractor.SumFromText(NumbersTextBox.Text);
 
-            // international output
             SumResultBox.Text = sum.ToString("0.00", CultureInfo.InvariantCulture);
             SumMetaText.Text = $"numbers found: {count}";
         }
@@ -171,6 +171,11 @@ namespace OCRBulkAdd
             {
                 StatusText.Text = "copy failed: " + ex.Message;
             }
+        }
+
+        private void MainWindow_Closing(object? sender, CancelEventArgs e)
+        {
+            SettingsStore.Save(Preprocess);
         }
     }
 }
